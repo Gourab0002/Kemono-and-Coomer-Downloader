@@ -4,7 +4,7 @@
 
 [![](img/en-flag.svg) English](README.md) | [![](img/br.png) Português](README-ptbr.md)
 
-The **Kemono and Coomer Downloader** is a tool that allows you to download posts from [Kemono](https://kemono.su/) and [Coomer](https://coomer.su/) websites.
+The **Kemono and Coomer Downloader** is a tool that allows you to download posts from [Kemono](https://kemono.cr/) and [Coomer](https://coomer.st/) websites.
 
 With this tool, you can download single posts, multiple posts sequentially, or download all posts from a Kemono or Coomer profile.
 
@@ -72,7 +72,7 @@ The project's home page presents the main options available to facilitate tool u
 To download specific posts, enter the post links separated by commas. This option is ideal for downloading a few posts. Example:
 
 ```sh
-https://coomer.su/onlyfans/user/rosiee616/post/1005002977, https://kemono.su/patreon/user/9919437/post/103396563
+https://coomer.st/onlyfans/user/rosiee616/post/1005002977, https://kemono.cr/patreon/user/9919437/post/103396563
 ```
 
 ![Posts](img/posts.png)
@@ -88,7 +88,7 @@ If you have multiple post links to download, simplify the process using a `.txt`
    - Separate links with **commas**.
    - Example file content:
 ```sh
-https://coomer.su/onlyfans/user/rosiee616/post/1005002977, https://kemono.su/patreon/user/9919437/post/103396563
+https://coomer.st/onlyfans/user/rosiee616/post/1005002977, https://kemono.cr/patreon/user/9919437/post/103396563
 ```
 3. Save the file with the `.txt` extension. For example: `posts.txt`.
 
@@ -159,7 +159,7 @@ The system will process the link, extract all posts, and perform the download.
   2. Click on the desired page and observe the number at the end of the link.
      Example:
 ```
-https://kemono.su/patreon/user/9919437?o=750
+https://kemono.cr/patreon/user/9919437?o=750
 ```
 In this case, the offset is **750**.
 
@@ -191,7 +191,7 @@ All posts between the specified offsets will be extracted and downloaded.
 3. Enter the link or ID of the **initial post**.
    - Example link:
 ```
-https://kemono.su/patreon/user/9919437/post/54725686
+https://kemono.cr/patreon/user/9919437/post/54725686
 ```
    - Just the ID: `54725686`.
 4. Enter the link or ID of the **final post**.

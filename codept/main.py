@@ -241,9 +241,9 @@ def download_specific_posts():
     for link in links:
         try:
             domain = link.split('/')[2]
-            if domain == 'kemono.su':
+            if domain in ['kemono.su', 'kemono.cr']:
                 script_path = os.path.join('codes', 'kcposts.py')
-            elif domain == 'coomer.su':
+            elif domain in ['coomer.su', 'coomer.st']:
                 script_path = os.path.join('codes', 'kcposts.py')
             else:
                 print(f"Domínio não suportado: {domain}")

@@ -45,12 +45,15 @@ def save_profiles(path, profiles):
     with open(path, 'w', encoding='utf-8') as file:
         json.dump(profiles, file, indent=4)
 
+SUPPORTED_DOMAINS = ['kemono.su', 'coomer.su', 'kemono.cr', 'coomer.st']
+_DOMAIN_PATTERN = '|'.join(re.escape(d) for d in SUPPORTED_DOMAINS)
+
 def extract_data_from_link(link):
     """
-    Extract service, user_id, and post_id from both kemono.su and coomer.su links
+    Extract service, user_id, and post_id from kemono and coomer links
     """
-    # Pattern for both kemono.su and coomer.su
-    match = re.match(r"https://(kemono|coomer)\.su/([^/]+)/user/([^/]+)/post/([^/]+)", link)
+    # Pattern for all supported domains
+    match = re.match(rf"https://({_DOMAIN_PATTERN})/([^/]+)/user/([^/]+)/post/([^/]+)", link)
     if not match:
         raise ValueError("Invalid link format")
     
@@ -63,7 +66,7 @@ def get_api_base_url(domain):
     """
     Dynamically generate API base URL based on the domain
     """
-    return f"https://{domain}.su/api/v1/"
+    return f"https://{domain}/api/v1/"
 
 def fetch_profile(domain, service, user_id):
     """
@@ -152,7 +155,7 @@ def download_files(file_list, folder_path):
         # Check if URL is from allowed domains
         parsed_url = urlparse(url)
         domain = parsed_url.netloc.split('.')[-2] + '.' + parsed_url.netloc.split('.')[-1]  # Get main domain
-        if domain not in ['kemono.su', 'coomer.su']:
+        if domain not in SUPPORTED_DOMAINS:
             print(f"⚠️ Ignorando URL de domínio não permitido: {url}")
             continue
 
@@ -352,7 +355,7 @@ def main():
     # Verificar se links foram passados por linha de comando
     if len(sys.argv) < 2:
         print("Por favor, forneça pelo menos um link como argumento.")
-        print("Exemplo: python kcposts.py https://kemono.su/link1, https://coomer.su/link2")
+        print("Exemplo: python kcposts.py https://kemono.cr/link1, https://coomer.st/link2")
         sys.exit(1)
 
     # Processar cada link passado
@@ -366,7 +369,7 @@ def main():
             domain, service, user_id, post_id = extract_data_from_link(user_link)
 
             # Setup paths
-            base_path = domain  # Use domain as base path (kemono or coomer)
+            base_path = domain.split('.')[0]  # Use 'kemono' or 'coomer' as base path
             profiles_path = os.path.join(base_path, "profiles.json")
 
             ensure_directory(base_path)
