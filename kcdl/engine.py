@@ -118,11 +118,14 @@ def _walk_offsets(api, site, service, user_id, mode, settings, on_note, empty_co
     return profile, collected
 
 
-def _with_details(api, site, service, user_id, posts, settings):
+def _with_details(api, site, service, user_id, posts, settings, on_note=None):
     if not settings.save_info:
         return posts
     detailed = []
-    for post in posts:
+    total = len(posts)
+    for index, post in enumerate(posts, start=1):
+        if on_note:
+            on_note("detail", index=index, total=total, post_id=post["id"])
         try:
             payload = api.post(site, service, user_id, post["id"])
             detailed.append(normalize_detail(payload, site))
@@ -142,10 +145,18 @@ def _download_ready(session, site, profile, posts, settings, on_note, on_post, o
         posts[0]["user"] or str(profile.get("id") or ""),
     )
     outcomes = []
-    for post in posts:
+    total = len(posts)
+    if on_note:
+        on_note("download-start", total=total)
+    for index, post in enumerate(posts, start=1):
         post_id = sanitize_id(post["id"])
         flat = not settings.separate_folders
         post_folder = folder if flat else folder / "posts" / post_id
+        title = (post.get("title") or post["id"]).replace("\n", " ").strip()
+        if len(title) > 80:
+            title = title[:77] + "..."
+        if on_note:
+            on_note("post", index=index, total=total, post_id=post["id"], title=title)
         if on_post:
             on_post(post)
         try:
@@ -190,6 +201,8 @@ def _download_ready(session, site, profile, posts, settings, on_note, on_post, o
                 folder=str(post_folder),
                 error=str(exc),
             ))
+            if on_note:
+                on_note("post-done", index=index, total=total)
             continue
         if settings.save_info:
             extension = "md" if settings.post_info == "md" else "txt"
@@ -204,6 +217,8 @@ def _download_ready(session, site, profile, posts, settings, on_note, on_post, o
             folder=str(post_folder),
             files=files,
         ))
+        if on_note:
+            on_note("post-done", index=index, total=total)
     return outcomes
 
 
@@ -293,7 +308,10 @@ def run_links(urls, settings, on_note=None, on_post=None, on_file=None):
             result.errors.append(str(exc))
             continue
         posts = []
-        for post_id in bundle["ids"]:
+        id_total = len(bundle["ids"])
+        for index, post_id in enumerate(bundle["ids"], start=1):
+            if on_note:
+                on_note("detail", index=index, total=id_total, post_id=post_id)
             try:
                 payload = api.post(target.site, target.service, target.user_id, post_id)
                 posts.append(normalize_detail(payload, target.site))
@@ -342,8 +360,14 @@ def run_profile(url, mode, settings, on_note=None, on_post=None, on_file=None):
     sort_posts(posts, settings.process_from_oldest)
     if settings.limit:
         posts = posts[: settings.limit]
+    if on_note:
+        on_note("listed", kept=len(posts), empty=result.empty_skipped)
     try:
-        posts = _with_details(api, target.site, target.service, target.user_id, posts, settings)
+        if settings.save_info and posts and on_note:
+            on_note("details", total=len(posts))
+        posts = _with_details(
+            api, target.site, target.service, target.user_id, posts, settings, on_note
+        )
     except ApiError as exc:
         result.errors.append(str(exc))
         return result

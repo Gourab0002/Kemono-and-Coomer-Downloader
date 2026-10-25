@@ -94,7 +94,7 @@ Com uma pasta só, as imagens ficam direto em `Nome-serviço-userId\`. Se dois p
 
 O Kemono e o Coomer guardam o texto do post no site principal. Os arquivos completos ficam nos servidores `n1`–`n4`, e esses servidores muitas vezes não aceitam conexão. Quando isso acontece com um arquivo do Kemono, o programa baixa o mesmo arquivo em `https://file.pawchive.pw`. Esse servidor pede um user agent identificável e no máximo um pedido por segundo. Este programa faz as duas coisas.
 
-Os arquivos do Coomer não estão nesse espelho. Se o servidor de arquivos do Coomer não responde, o programa salva a prévia de `img.coomer.st` e avisa no log. O arquivo de informações marca esse arquivo como prévia.
+Os arquivos do Coomer não estão nesse espelho. Se o servidor de arquivos do Coomer não responde, o programa salva a prévia de `img.coomer.st` e avisa no log. O arquivo de informações marca esse arquivo como prévia. Depois de algumas falhas, servidores caídos ou sem cópia são ignorados, e as prévias não ficam presas ao limite de um segundo do Pawchive.
 
 O user agent é `KemonoCoomerDownloader/2.0 (+https://github.com/e43b/Kemono-and-Coomer-Downloader)`.
 

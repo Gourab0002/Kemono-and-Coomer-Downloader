@@ -1,11 +1,15 @@
 """Tests for link parsing, ranges, and the file fallback downloader."""
 
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import requests
 
+from kcdl.cli import Progress
 from kcdl.config import normalize
 from kcdl.download import _flat_name, _take_legacy_manifest, build_candidates, download_candidates, download_post_files
 from kcdl.engine import _remove_legacy_info, _walk_offsets
@@ -22,7 +26,7 @@ from kcdl.media import (
     render_info,
     sort_posts,
 )
-from kcdl.sites import KEMONO, parse_target, split_links
+from kcdl.sites import COOMER, KEMONO, parse_target, split_links
 from kcdl.config import settings_from
 
 
@@ -203,6 +207,16 @@ class FileTests(unittest.TestCase):
         self.assertEqual(urls[-1][1], "preview")
         self.assertTrue(all("n4.kemono.cr" not in url for url, _kind in urls))
 
+    def test_failed_hosts_are_not_tried_on_the_next_file(self):
+        health = HostHealth()
+        health.mark_dead("n4.coomer.st")
+        self.assertTrue(health.skip_redirect("coomer.st"))
+        self.assertFalse(health.note_miss("file.pawchive.pw"))
+        self.assertFalse(health.note_miss("file.pawchive.pw"))
+        self.assertTrue(health.note_miss("file.pawchive.pw"))
+        urls = [url for url, _kind in build_candidates(COOMER, PATH, "https://n4.coomer.st", health)]
+        self.assertEqual(urls, ["https://img.coomer.st/thumbnail/data" + PATH])
+
     def test_download_uses_next_server_when_cdn_times_out(self):
         root = "https://kemono.cr/data" + PATH
         cdn = "https://n4.kemono.cr/data" + PATH
@@ -327,6 +341,29 @@ class FileTests(unittest.TestCase):
             self.assertFalse((pictures / "files.md").exists())
             self.assertTrue((pictures / "1-pic.jpg").exists())
             self.assertIn("kcdl-state", path.parts)
+
+
+class ProgressTests(unittest.TestCase):
+    def test_status_updates_while_work_is_happening(self):
+        progress = Progress("en")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            progress.note("listed", kept=2, empty=1)
+            progress.note("detail", index=1, total=2, post_id="9")
+            progress.note("post", index=1, total=2, post_id="9", title="Hello")
+            progress.note("file", index=1, total=3, name="a.jpg")
+            progress.note("trying", host="img.coomer.st", name="a.jpg")
+            progress.file_done(SimpleNamespace(
+                status="downloaded", kind="preview", name="a.jpg", nbytes=10, error=""
+            ))
+            progress.note("post-done", index=1, total=2)
+        text = buf.getvalue()
+        self.assertIn("Ready: 2 posts", text)
+        self.assertIn("Loading details 1/2: post 9", text)
+        self.assertIn("Post 1/2 9: Hello", text)
+        self.assertIn("waiting on img.coomer.st", text)
+        self.assertIn("saved preview a.jpg", text)
+        self.assertIn("Status: posts 1/2. Saved 0. Previews 1. Skipped 0. Failed 0.", text)
 
 
 class ConfigTests(unittest.TestCase):

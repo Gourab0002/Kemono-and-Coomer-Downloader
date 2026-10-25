@@ -91,36 +91,118 @@ def make_settings(config, download_dir, language, limit):
     return settings_from(config, download_dir or Path.cwd(), language=language, limit=limit)
 
 
-def on_note(language, kind, **kwargs):
-    if kind == "dead-host":
-        print(tr(language, "dead_host", host=kwargs.get("host", "")), flush=True)
-    elif kind == "creator":
-        print(tr(
-            language,
-            "creator",
-            name=kwargs.get("name", ""),
-            service=kwargs.get("service", ""),
-            user=kwargs.get("user", ""),
-            count=kwargs.get("count", 0),
-        ), flush=True)
-    elif kind == "page":
-        print(tr(language, "page", offset=kwargs.get("offset", 0), count=kwargs.get("count", 0)), flush=True)
+class Progress:
+    """Print each step as it starts, and keep a running tally."""
 
+    width = 100
 
-def on_post(language, post):
-    print(tr(language, "post_line", post_id=post["id"], title=post.get("title") or post["id"]), flush=True)
+    def __init__(self, language):
+        self.language = language
+        self.saved = 0
+        self.previews = 0
+        self.skipped = 0
+        self.failed = 0
+        self.post_index = 0
+        self.post_total = 0
+        self.file_index = 0
+        self.file_total = 0
 
+    def note(self, kind, **kwargs):
+        if kind == "detail":
+            self.live(tr(self.language, "detail", index=kwargs.get("index", 0), total=kwargs.get("total", 0), post_id=kwargs.get("post_id", "")))
+        elif kind == "details":
+            self.live(tr(self.language, "details", total=kwargs.get("total", 0)))
+        elif kind == "file":
+            self.file_index = kwargs.get("index", 0)
+            self.file_total = kwargs.get("total", 0)
+            self.live(tr(
+                self.language,
+                "file_start",
+                post_index=self.post_index,
+                post_total=self.post_total,
+                index=self.file_index,
+                total=self.file_total,
+                name=kwargs.get("name", ""),
+            ))
+        elif kind == "trying":
+            self.live(tr(
+                self.language,
+                "trying",
+                post_index=self.post_index,
+                post_total=self.post_total,
+                index=self.file_index,
+                total=self.file_total,
+                host=kwargs.get("host", ""),
+                name=kwargs.get("name", ""),
+            ))
+        elif kind == "post":
+            self.post_index = kwargs.get("index", 0)
+            self.post_total = kwargs.get("total", 0)
+            self.commit(tr(
+                self.language,
+                "post_line",
+                index=self.post_index,
+                total=self.post_total,
+                post_id=kwargs.get("post_id", ""),
+                title=kwargs.get("title") or kwargs.get("post_id", ""),
+            ))
+        elif kind == "post-done":
+            self.commit(tr(
+                self.language,
+                "status",
+                done=kwargs.get("index", self.post_index),
+                total=kwargs.get("total", self.post_total),
+                saved=self.saved,
+                previews=self.previews,
+                skipped=self.skipped,
+                failed=self.failed,
+            ))
+        elif kind == "download-start":
+            self.post_total = kwargs.get("total", 0)
+            self.commit(tr(self.language, "download_start", total=self.post_total))
+        elif kind == "listed":
+            self.commit(tr(self.language, "listed", kept=kwargs.get("kept", 0), empty=kwargs.get("empty", 0)))
+        elif kind == "dead-host":
+            self.commit(tr(self.language, "dead_host", host=kwargs.get("host", "")))
+        elif kind == "skip-host":
+            self.commit(tr(self.language, "skip_host", host=kwargs.get("host", "")))
+        elif kind == "creator":
+            self.commit(tr(
+                self.language,
+                "creator",
+                name=kwargs.get("name", ""),
+                service=kwargs.get("service", ""),
+                user=kwargs.get("user", ""),
+                count=kwargs.get("count", 0),
+            ))
+        elif kind == "page":
+            self.commit(tr(self.language, "page", offset=kwargs.get("offset", 0), count=kwargs.get("count", 0)))
 
-def on_file(language, post_id, item):
-    del post_id
-    if item.status == "failed":
-        print(tr(language, "failed", name=item.name, error=item.error), flush=True)
-    elif item.status == "skipped":
-        print(tr(language, "skipped", name=item.name), flush=True)
-    elif item.kind == "preview":
-        print(tr(language, "saved_preview", name=item.name, nbytes=item.nbytes), flush=True)
-    else:
-        print(tr(language, "saved", name=item.name, nbytes=item.nbytes), flush=True)
+    def file_done(self, item):
+        if item.status == "failed":
+            self.failed += 1
+            line = tr(self.language, "failed", name=item.name, error=item.error)
+        elif item.kind == "preview":
+            self.previews += 1
+            if item.status == "skipped":
+                line = tr(self.language, "skipped", name=item.name)
+            else:
+                line = tr(self.language, "saved_preview", name=item.name, nbytes=item.nbytes)
+        elif item.status == "skipped":
+            self.skipped += 1
+            line = tr(self.language, "skipped", name=item.name)
+        else:
+            self.saved += 1
+            line = tr(self.language, "saved", name=item.name, nbytes=item.nbytes)
+        self.commit(line)
+
+    def live(self, text):
+        shown = text if len(text) <= self.width else text[:self.width - 3] + "..."
+        print("\r" + shown.ljust(self.width), end="", flush=True)
+
+    def commit(self, text):
+        gap = max(0, self.width - len(text))
+        print("\r" + text + (" " * gap), flush=True)
 
 
 def print_summary(language, result):
@@ -160,24 +242,24 @@ def run_post_command(urls, settings, language):
     if not urls:
         print(tr(language, "no_links"))
         return 1
+    progress = Progress(language)
     result = run_links(
         urls,
         settings,
-        on_note=lambda kind, **kwargs: on_note(language, kind, **kwargs),
-        on_post=lambda post: on_post(language, post),
-        on_file=lambda post_id, item: on_file(language, post_id, item),
+        on_note=progress.note,
+        on_file=lambda post_id, item: progress.file_done(item),
     )
     return print_summary(language, result)
 
 
 def run_profile_command(url, mode, settings, language):
+    progress = Progress(language)
     result = run_profile(
         url,
         mode,
         settings,
-        on_note=lambda kind, **kwargs: on_note(language, kind, **kwargs),
-        on_post=lambda post: on_post(language, post),
-        on_file=lambda post_id, item: on_file(language, post_id, item),
+        on_note=progress.note,
+        on_file=lambda post_id, item: progress.file_done(item),
     )
     return print_summary(language, result)
 

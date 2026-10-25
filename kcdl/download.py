@@ -17,6 +17,8 @@ from kcdl.http import (
 from kcdl.media import assign_names, sanitize_filename, write_json
 
 PAWCHIVE_FILES = "https://file.pawchive.pw"
+PAWCHIVE_HOST = "file.pawchive.pw"
+PREVIEW_INTERVAL = 0.2
 TEXT_TYPES = {"text/html", "text/plain", "application/json"}
 
 
@@ -37,7 +39,7 @@ def build_candidates(site, remote_path, server, health):
     open_candidates = []
     seen = set()
     for url, kind in candidates:
-        if url in seen or health.is_dead(hostname(url)):
+        if url in seen or health.is_blocked(hostname(url)):
             continue
         seen.add(url)
         open_candidates.append((url, kind))
@@ -71,14 +73,16 @@ def _save_body(response, dest):
     return written
 
 
-def _follow(session, url, referer, health, pace, timeouts, on_note):
+def _follow(session, url, referer, health, pace, timeouts, on_note, name=""):
     """GET one candidate, following redirects until a body or a dead host."""
     current = url
     for _ in range(5):
         host = hostname(current)
-        if health.is_dead(host):
+        if health.is_blocked(host):
             raise DeadHost(host)
-        pace.wait()
+        if on_note:
+            on_note("trying", host=host, name=name)
+        pace.wait(host, pace.interval if host == PAWCHIVE_HOST else min(pace.interval, PREVIEW_INTERVAL))
         headers = dict(FILE_HEADERS)
         headers["Referer"] = referer
         try:
@@ -100,6 +104,8 @@ def _follow(session, url, referer, health, pace, timeouts, on_note):
                 raise DownloadError("Redirect with no location")
             next_host = hostname(location)
             if health.is_dead(next_host):
+                if health.skip_redirect(host) and on_note:
+                    on_note("skip-host", host=host)
                 raise DeadHost(next_host)
             current = location
             continue
@@ -111,12 +117,12 @@ def download_candidates(session, candidates, dest, health, pace, referer, timeou
     """Try each URL. Return a result dict or raise DownloadError."""
     errors = []
     for url, kind in candidates:
-        if health.is_dead(hostname(url)):
+        if health.is_blocked(hostname(url)):
             continue
         for attempt in range(3):
             try:
                 response, final_url = _follow(
-                    session, url, referer, health, pace, timeouts, on_note
+                    session, url, referer, health, pace, timeouts, on_note, dest.name
                 )
             except DeadHost as exc:
                 errors.append(f"{url} ({exc.host} unreachable)")
@@ -138,6 +144,8 @@ def download_candidates(session, candidates, dest, health, pace, referer, timeou
             if status != 200:
                 response.close()
                 errors.append(f"{url} (HTTP {status})")
+                if status == 404 and hostname(url) == PAWCHIVE_HOST and health.note_miss(PAWCHIVE_HOST) and on_note:
+                    on_note("skip-host", host=PAWCHIVE_HOST)
                 break
             if _content_type(response) in TEXT_TYPES:
                 response.close()
@@ -148,6 +156,7 @@ def download_candidates(session, candidates, dest, health, pace, referer, timeou
             except (OSError, requests.RequestException, DownloadError) as exc:
                 errors.append(f"{url} ({exc})")
                 break
+            health.note_hit(hostname(final_url))
             return {
                 "status": "downloaded",
                 "kind": kind,
@@ -241,11 +250,15 @@ def download_post_files(
     referer = post.get("link") or site.root + "/"
     outcomes = []
 
-    for item, name in assign_names(post.get("files") or []):
+    named = list(assign_names(post.get("files") or []))
+    total = len(named)
+    for index, (item, name) in enumerate(named, start=1):
         record = manifest.get(item["path"]) if isinstance(manifest.get(item["path"]), dict) else None
         if flat and not record:
             name = _flat_name(folder, name, item["path"], manifest, post.get("id") or "post")
         dest = _existing_file(folder, name, record)
+        if on_note:
+            on_note("file", index=index, total=total, name=dest.name)
         if _already_complete(dest, record):
             outcome = {
                 "name": dest.name,
