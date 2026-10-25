@@ -48,6 +48,8 @@ py -3 main.py --layout flat profile "https://coomer.st/onlyfans/user/USER_ID"
 
 `--limit 10` para depois de 10 posts. `--dir` escolhe onde as pastas dos sites são criadas. O padrão é a pasta de onde você iniciou o programa. `--layout folders` mantém uma pasta por post. `--layout flat` coloca todos os arquivos na pasta do criador. O menu pergunta isso antes de cada download.
 
+Enquanto um download está em andamento, a janela mostra a pasta de destino, o arquivo atual e uma estimativa de tempo. Clicar no texto não pausa o programa.
+
 ## Configurações
 
 `config/conf.json`:
@@ -94,7 +96,7 @@ Com uma pasta só, as imagens ficam direto em `Nome-serviço-userId\`. Se dois p
 
 O Kemono e o Coomer guardam o texto do post no site principal. Os arquivos completos ficam nos servidores `n1`–`n4`, e esses servidores muitas vezes não aceitam conexão. Quando isso acontece com um arquivo do Kemono, o programa baixa o mesmo arquivo em `https://file.pawchive.pw`. Esse servidor pede um user agent identificável e no máximo um pedido por segundo. Este programa faz as duas coisas.
 
-Os arquivos do Coomer não estão nesse espelho. Se o servidor de arquivos do Coomer não responde, o programa salva a prévia de `img.coomer.st` e avisa no log. O arquivo de informações marca esse arquivo como prévia. Depois de algumas falhas, servidores caídos ou sem cópia são ignorados, e as prévias não ficam presas ao limite de um segundo do Pawchive.
+Os arquivos do Coomer não estão nesse espelho. Se o servidor de arquivos do Coomer não responde, o programa salva a prévia de `img.coomer.st` e avisa no log. O arquivo de informações marca esse arquivo como prévia. Uma falha de conexão não descarta o servidor. Ele é ignorado depois de várias falhas de conexão, ou antes quando só redireciona para um servidor caído, ou quando o Pawchive responde 404 várias vezes. Os posts que ainda falharam são tentados mais uma vez no final quando uma falha de conexão esteve envolvida. As prévias não ficam presas ao limite de um segundo do Pawchive.
 
 O user agent é `KemonoCoomerDownloader/2.0 (+https://github.com/e43b/Kemono-and-Coomer-Downloader)`.
 

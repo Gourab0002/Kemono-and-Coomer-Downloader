@@ -94,7 +94,7 @@ def _follow(session, url, referer, health, pace, timeouts, on_note, name=""):
                 allow_redirects=False,
             )
         except (requests.ConnectTimeout, requests.ConnectionError) as exc:
-            if health.mark_dead(host) and on_note:
+            if health.note_down(host) and on_note:
                 on_note("dead-host", host=host)
             raise DeadHost(host) from exc
         if response.status_code in REDIRECTS:

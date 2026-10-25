@@ -36,6 +36,7 @@ class HostHealth:
         self._useless = set()
         self._hits = set()
         self._misses = {}
+        self._down = {}
         self._lock = threading.Lock()
 
     def is_dead(self, host):
@@ -62,6 +63,33 @@ class HostHealth:
             self._dead.add(key)
             return True
 
+    def note_down(self, host, limit=3):
+        """Count a connection failure. Return True the first time the host is skipped."""
+        if not host:
+            return False
+        key = host.lower()
+        with self._lock:
+            if key in self._dead:
+                return False
+            count = self._down.get(key, 0) + 1
+            self._down[key] = count
+            if count < limit:
+                return False
+            self._dead.add(key)
+            return True
+
+    def forgive_outages(self):
+        """Clear connection failures so failed files can be tried once more.
+
+        Hosts skipped for redirects or repeated 404s stay blocked.
+        """
+        with self._lock:
+            if not self._dead and not self._down:
+                return False
+            self._dead.clear()
+            self._down.clear()
+            return True
+
     def skip_redirect(self, host):
         """The host only redirects to a file server that is already down."""
         if not host:
@@ -80,7 +108,9 @@ class HostHealth:
         with self._lock:
             self._hits.add(key)
             self._misses.pop(key, None)
+            self._down.pop(key, None)
             self._useless.discard(key)
+            self._dead.discard(key)
 
     def note_miss(self, host, limit=3):
         """Return True the first time repeated misses block this host."""

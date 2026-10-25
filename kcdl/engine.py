@@ -29,6 +29,7 @@ class FileOutcome:
     kind: str = ""
     source: str = ""
     error: str = ""
+    retry: bool = False
 
 
 @dataclass
@@ -134,7 +135,7 @@ def _with_details(api, site, service, user_id, posts, settings, on_note=None):
     return detailed
 
 
-def _download_ready(session, site, profile, posts, settings, on_note, on_post, on_file):
+def _download_ready(session, site, profile, posts, settings, on_note, on_post, on_file, retrying=False):
     if not posts:
         return []
     folder = creator_folder(
@@ -146,7 +147,8 @@ def _download_ready(session, site, profile, posts, settings, on_note, on_post, o
     )
     outcomes = []
     total = len(posts)
-    if on_note:
+    if on_note and not retrying:
+        on_note("folder", path=str(folder))
         on_note("download-start", total=total)
     for index, post in enumerate(posts, start=1):
         post_id = sanitize_id(post["id"])
@@ -170,6 +172,7 @@ def _download_ready(session, site, profile, posts, settings, on_note, on_post, o
                     kind=payload["kind"],
                     source=payload["source"],
                     error=payload["error"],
+                    retry=retrying,
                 )
                 _files.append(item)
                 if on_file:
@@ -220,6 +223,32 @@ def _download_ready(session, site, profile, posts, settings, on_note, on_post, o
         if on_note:
             on_note("post-done", index=index, total=total)
     return outcomes
+
+
+def _needs_another_try(outcome):
+    if outcome.error:
+        return True
+    return any(item.status == "failed" for item in outcome.files)
+
+
+def _download_with_retry(session, site, profile, posts, settings, on_note, on_post, on_file):
+    """Save posts, then try failed ones once more if a connection blip blocked a server."""
+    outcomes = _download_ready(
+        session, site, profile, posts, settings, on_note, on_post, on_file
+    )
+    failed_ids = {item.post_id for item in outcomes if _needs_another_try(item)}
+    if not failed_ids or not settings_health(settings).forgive_outages():
+        return outcomes
+    retry_posts = [post for post in posts if post["id"] in failed_ids]
+    if not retry_posts:
+        return outcomes
+    if on_note:
+        on_note("retry", count=len(retry_posts))
+    second = _download_ready(
+        session, site, profile, retry_posts, settings, on_note, on_post, on_file, retrying=True
+    )
+    by_id = {item.post_id: item for item in second}
+    return [by_id.get(item.post_id, item) for item in outcomes]
 
 
 def _remove_legacy_info(post_folder, info_path, post_id):
@@ -321,7 +350,7 @@ def run_links(urls, settings, on_note=None, on_post=None, on_file=None):
         if settings.limit:
             posts = posts[: settings.limit]
         result.posts.extend(
-            _download_ready(
+            _download_with_retry(
                 session, target.site, profile, posts, settings, on_note, on_post, on_file
             )
         )
@@ -374,7 +403,7 @@ def run_profile(url, mode, settings, on_note=None, on_post=None, on_file=None):
     if not posts:
         return result
     result.posts.extend(
-        _download_ready(
+        _download_with_retry(
             session, target.site, profile, posts, settings, on_note, on_post, on_file
         )
     )

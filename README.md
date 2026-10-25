@@ -48,6 +48,8 @@ py -3 main.py --layout flat profile "https://coomer.st/onlyfans/user/USER_ID"
 
 `--limit 10` stops after 10 posts. `--dir` chooses where the site folders are created. The default is the folder you started the program from. `--layout folders` keeps one folder per post. `--layout flat` puts every file in the creator folder. The menu asks this before each download.
 
+While a download is running, the window shows the save folder, the current file, and a rough time left. Clicking the text does not pause the program.
+
 ## Settings
 
 `config/conf.json`:
@@ -94,7 +96,7 @@ With one shared folder, the pictures sit directly inside `Name-service-userId\`.
 
 Kemono and Coomer keep post text on the main site. The full files are on `n1`–`n4` servers, and those servers often do not accept connections. When that happens for a Kemono file, the program downloads the same file from `https://file.pawchive.pw`, which asks downloaders to send an identifiable user agent and to stay at or under one request per second. This program does both.
 
-Coomer files are not on that mirror. If the Coomer file server does not respond, the program saves the preview from `img.coomer.st` and says so in the log. The info file marks that file as a preview. After a few misses, hosts that are down or have no copy are skipped, and preview downloads are not held to the one-second Pawchive limit.
+Coomer files are not on that mirror. If the Coomer file server does not respond, the program saves the preview from `img.coomer.st` and says so in the log. The info file marks that file as a preview. One failed connection does not retire a server. A server is skipped after several connection failures, or sooner when it only redirects to a dead server, or when Pawchive answers 404 several times. Posts that still failed are tried once more at the end when a connection problem was involved. Preview downloads are not held to the one-second Pawchive limit.
 
 The user agent is `KemonoCoomerDownloader/2.0 (+https://github.com/e43b/Kemono-and-Coomer-Downloader)`.
 

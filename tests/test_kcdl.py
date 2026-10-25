@@ -9,12 +9,12 @@ from types import SimpleNamespace
 
 import requests
 
-from kcdl.cli import Progress
+from kcdl.cli import Progress, _format_remaining, _input_mode
 from kcdl.config import normalize
 from kcdl.download import _flat_name, _take_legacy_manifest, build_candidates, download_candidates, download_post_files
-from kcdl.engine import _remove_legacy_info, _walk_offsets
+from kcdl.engine import _download_with_retry, _remove_legacy_info, _walk_offsets
 from kcdl.media import info_file
-from kcdl.http import HostHealth, Pace
+from kcdl.http import DownloadError, HostHealth, Pace
 from kcdl.media import (
     FetchMode,
     assign_names,
@@ -242,8 +242,130 @@ class FileTests(unittest.TestCase):
             self.assertEqual(dest.read_bytes(), body)
         self.assertEqual(result["kind"], "original")
         self.assertEqual(result["source"], mirror)
-        self.assertTrue(health.is_dead("n4.kemono.cr"))
+        self.assertFalse(health.is_dead("n4.kemono.cr"))
+        self.assertFalse(health.is_blocked("n4.kemono.cr"))
         self.assertNotIn(cdn, session.calls[2:])
+
+    def test_three_connection_failures_skip_the_host(self):
+        url = "https://n4.kemono.cr/data" + PATH
+        session = FakeSession({url: requests.ConnectTimeout("timed out")})
+        health = HostHealth()
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "pic.png"
+            for _ in range(2):
+                with self.assertRaises(DownloadError):
+                    download_candidates(session, [(url, "original")], dest, health, Pace(0), "https://kemono.cr/", (1, 1))
+                self.assertFalse(health.is_dead("n4.kemono.cr"))
+            with self.assertRaises(DownloadError):
+                download_candidates(session, [(url, "original")], dest, health, Pace(0), "https://kemono.cr/", (1, 1))
+        self.assertTrue(health.is_dead("n4.kemono.cr"))
+        self.assertEqual(len(session.calls), 3)
+        with self.assertRaises(DownloadError):
+            download_candidates(session, [(url, "original")], dest, health, Pace(0), "https://kemono.cr/", (1, 1))
+        self.assertEqual(len(session.calls), 3)
+
+    def test_connection_strikes_are_forgiven_and_useless_hosts_stay_blocked(self):
+        health = HostHealth()
+        self.assertFalse(health.note_down("img.coomer.st"))
+        self.assertFalse(health.note_down("img.coomer.st"))
+        self.assertFalse(health.is_blocked("img.coomer.st"))
+        self.assertTrue(health.note_down("img.coomer.st"))
+        self.assertTrue(health.is_dead("img.coomer.st"))
+        health.note_hit("img.coomer.st")
+        self.assertFalse(health.is_dead("img.coomer.st"))
+        health.mark_dead("n4.kemono.cr")
+        self.assertTrue(health.skip_redirect("coomer.st"))
+        self.assertFalse(health.note_miss("file.pawchive.pw"))
+        self.assertFalse(health.note_miss("file.pawchive.pw"))
+        self.assertTrue(health.note_miss("file.pawchive.pw"))
+        self.assertTrue(health.forgive_outages())
+        self.assertFalse(health.is_dead("n4.kemono.cr"))
+        self.assertFalse(health.is_blocked("n4.kemono.cr"))
+        self.assertTrue(health.is_blocked("coomer.st"))
+        self.assertTrue(health.is_blocked("file.pawchive.pw"))
+        self.assertFalse(health.forgive_outages())
+
+    def test_a_connection_blip_is_retried_once(self):
+        url = "https://img.coomer.st/thumbnail/data" + PATH
+        body = b"jpeg-bytes"
+
+        class Flaky:
+            def __init__(self):
+                self.calls = []
+
+            def get(self, request_url, **kwargs):
+                self.calls.append(request_url)
+                if len(self.calls) == 1:
+                    raise requests.ConnectTimeout("timed out")
+                return FakeResponse(200, {"Content-Type": "image/jpeg"}, body)
+
+        session = Flaky()
+        notes = []
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = settings_from({"save_info": False}, Path(tmp))
+            settings._pace = Pace(0)
+            outcomes = _download_with_retry(
+                session,
+                COOMER,
+                {"name": "Creator", "service": "onlyfans", "id": "creator"},
+                [{
+                    "id": "9",
+                    "service": "onlyfans",
+                    "user": "creator",
+                    "title": "Hi",
+                    "files": [{"name": "pic.jpg", "path": url}],
+                    "link": "https://coomer.st/",
+                }],
+                settings,
+                on_note=lambda kind, **kwargs: notes.append((kind, kwargs.get("path", ""))),
+                on_post=None,
+                on_file=None,
+            )
+            saved = Path(tmp) / "coomer" / "Creator-onlyfans-creator" / "posts" / "9" / "1-pic.jpg"
+            self.assertEqual(saved.read_bytes(), body)
+        self.assertEqual(len(session.calls), 2)
+        self.assertEqual(outcomes[0].files[0].status, "downloaded")
+        self.assertTrue(outcomes[0].files[0].retry)
+        self.assertEqual([kind for kind, _path in notes].count("folder"), 1)
+        self.assertIn("retry", [kind for kind, _path in notes])
+        self.assertIn(str(saved.parent.parent.parent), notes[0][1])
+
+    def test_plain_misses_are_not_retried(self):
+        url = "https://img.coomer.st/thumbnail/data" + PATH
+
+        class Missing:
+            def __init__(self):
+                self.calls = []
+
+            def get(self, request_url, **kwargs):
+                self.calls.append(request_url)
+                return FakeResponse(404, {"Content-Type": "text/plain"}, b"missing")
+
+        session = Missing()
+        notes = []
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = settings_from({"save_info": False}, Path(tmp))
+            settings._pace = Pace(0)
+            outcomes = _download_with_retry(
+                session,
+                COOMER,
+                {"name": "Creator", "service": "onlyfans", "id": "creator"},
+                [{
+                    "id": "9",
+                    "service": "onlyfans",
+                    "user": "creator",
+                    "title": "Hi",
+                    "files": [{"name": "pic.jpg", "path": url}],
+                    "link": "https://coomer.st/",
+                }],
+                settings,
+                on_note=lambda kind, **kwargs: notes.append(kind),
+                on_post=None,
+                on_file=None,
+            )
+        self.assertEqual(len(session.calls), 1)
+        self.assertEqual(outcomes[0].files[0].status, "failed")
+        self.assertNotIn("retry", notes)
 
     def test_existing_original_is_skipped_and_preview_is_not_redownloaded(self):
         health = HostHealth()
@@ -364,6 +486,54 @@ class ProgressTests(unittest.TestCase):
         self.assertIn("waiting on img.coomer.st", text)
         self.assertIn("saved preview a.jpg", text)
         self.assertIn("Status: posts 1/2. Saved 0. Previews 1. Skipped 0. Failed 0.", text)
+        self.assertNotIn("left", text)
+
+    def test_status_shows_time_left_from_recent_posts(self):
+        progress = Progress("en")
+        progress._durations = [30.0]
+        progress._post_started = None
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            progress.note("post-done", index=1, total=3)
+        self.assertIn("About 1 min left.", buf.getvalue())
+        self.assertEqual(_format_remaining(45), "45s")
+        self.assertEqual(_format_remaining(60), "1 min")
+        self.assertEqual(_format_remaining(90 * 60), "1 h 30 min")
+
+    def test_folder_line_keeps_a_long_path(self):
+        progress = Progress("en")
+        path = "C:\\" + ("archive" * 30)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            progress.note("folder", path=path)
+        self.assertIn("Saving files to " + path, buf.getvalue())
+
+    def test_retry_updates_the_live_tally_once(self):
+        progress = Progress("en")
+        failed = SimpleNamespace(status="failed", kind="", name="a.jpg", nbytes=0, error="down", retry=False)
+        again = SimpleNamespace(status="failed", kind="", name="a.jpg", nbytes=0, error="down", retry=True)
+        preview = SimpleNamespace(status="downloaded", kind="preview", name="a.jpg", nbytes=10, error="", retry=True)
+        skip = SimpleNamespace(status="skipped", kind="preview", name="b.jpg", nbytes=4, error="", retry=True)
+        first_skip = SimpleNamespace(status="downloaded", kind="preview", name="b.jpg", nbytes=4, error="", retry=False)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            progress.file_done(failed, "9")
+            progress.file_done(again, "9")
+            progress.file_done(first_skip, "8")
+            progress.file_done(skip, "8")
+            progress.file_done(preview, "9")
+        self.assertEqual(progress.failed, 0)
+        self.assertEqual(progress.previews, 2)
+        self.assertEqual(progress.skipped, 0)
+        text = buf.getvalue()
+        self.assertEqual(text.count("failed a.jpg"), 1)
+        self.assertEqual(text.count("saved preview a.jpg"), 1)
+
+    def test_quick_edit_bit_is_cleared(self):
+        updated = _input_mode(0x0040 | 0x0002)
+        self.assertEqual(updated & 0x0040, 0)
+        self.assertEqual(updated & 0x0080, 0x0080)
+        self.assertEqual(updated & 0x0002, 0x0002)
 
 
 class ConfigTests(unittest.TestCase):

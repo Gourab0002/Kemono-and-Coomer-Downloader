@@ -1,31 +1,29 @@
 """Command line and the text menu."""
 
 import argparse
+import ctypes
 import os
 import sys
+import time
 from pathlib import Path
 
+from kcdl import __version__
 from kcdl.config import load, save, settings_from
 from kcdl.engine import run_links, run_profile
 from kcdl.i18n import tr
 from kcdl.media import FetchMode, mode_from_offset_text, numeric_id
 from kcdl.sites import LinkError, post_id_from_text, split_links
 
-LOGO = r"""
- _  __
-| |/ /___ _ __ ___   ___  _ __   ___
-| ' // _ \ '_ ` _ \ / _ \| '_ \ / _ \
-| . \  __/ | | | | | (_) | | | | (_) |
-|_|\_\___|_| |_| |_|\___/|_| |_|\___/
- / ___|___   ___  _ __ ___   ___ _ __
-| |   / _ \ / _ \| '_ ` _ \ / _ \ '__|
-| |__| (_) | (_) | | | | | |  __/ |
- \____\___/ \___/|_| |_| |_|\___|_|          _
-|  _ \  _____      ___ __ | | ___   __ _  __| | ___ _ __
-| | | |/ _ \ \ /\ / / '_ \| |/ _ \ / _` |/ _` |/ _ \ '__|
-| |_| | (_) \ V  V /| | | | | (_) | (_| | (_| |  __/ |
-|____/ \___/ \_/\_/ |_| |_|_|\___/ \__,_|\__,_|\___|_|
-"""
+_COLOR = False
+_STYLES = {
+    "bold": "\033[1m",
+    "dim": "\033[2m",
+    "accent": "\033[36m",
+    "green": "\033[32m",
+    "yellow": "\033[33m",
+    "red": "\033[31m",
+    "title": "\033[1;36m",
+}
 
 
 def configure_stdio():
@@ -35,6 +33,55 @@ def configure_stdio():
                 stream.reconfigure(encoding="utf-8", errors="replace")
             except (OSError, ValueError):
                 pass
+    global _COLOR
+    _COLOR = _prepare_console()
+
+
+def _input_mode(mode):
+    """Clear Quick Edit. The extended-flag bit has to stay set for that to take effect."""
+    return (mode | 0x0080) & ~0x0040
+
+
+def _prepare_console():
+    """Enable color, and stop a mouse click from pausing this window."""
+    color_ok = (
+        not os.environ.get("NO_COLOR")
+        and hasattr(sys.stdout, "isatty")
+        and sys.stdout.isatty()
+    )
+    if os.name != "nt":
+        return bool(color_ok)
+    try:
+        kernel = ctypes.windll.kernel32
+        kernel.GetStdHandle.restype = ctypes.c_void_p
+        kernel.GetConsoleMode.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint)]
+        kernel.GetConsoleMode.restype = ctypes.c_int
+        kernel.SetConsoleMode.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        kernel.SetConsoleMode.restype = ctypes.c_int
+        # Quick Edit is an input-console flag. A click selects text and freezes the process.
+        output_ok = _set_console_mode(kernel, -11, lambda mode: mode | 0x0004)
+        _set_console_mode(kernel, -10, _input_mode)
+    except (AttributeError, OSError):
+        return False
+    return bool(color_ok and output_ok)
+
+
+def _set_console_mode(kernel, standard_handle, update):
+    handle = kernel.GetStdHandle(standard_handle)
+    invalid = ctypes.c_void_p(-1).value
+    if not handle or handle == invalid:
+        return False
+    mode = ctypes.c_uint()
+    if not kernel.GetConsoleMode(handle, ctypes.byref(mode)):
+        return False
+    return bool(kernel.SetConsoleMode(handle, update(mode.value)))
+
+
+def paint(text, style=""):
+    code = _STYLES.get(style) if _COLOR else ""
+    if not code:
+        return text
+    return code + text + "\033[0m"
 
 
 def clear_screen():
@@ -42,11 +89,14 @@ def clear_screen():
 
 
 def banner(language):
-    print(LOGO)
-    print(tr(language, "tagline"))
-    print("GitHub: https://github.com/e43b/Kemono-and-Coomer-Downloader")
-    print("Discord: https://discord.gg/GNJbxzD8bK")
-    print("Donate: https://ko-fi.com/e43bs")
+    rule = "─" * 44
+    print(paint(rule, "dim"))
+    print("  " + paint("Kemono", "title") + paint("  &  ", "dim") + paint("Coomer", "title"))
+    print(paint(f"  {tr(language, 'tagline')}   ·   v{__version__}", "dim"))
+    print(paint(rule, "dim"))
+    print(paint("  GitHub", "dim") + "    https://github.com/e43b/Kemono-and-Coomer-Downloader")
+    print(paint("  Discord", "dim") + "   https://discord.gg/GNJbxzD8bK")
+    print(paint("  Donate", "dim") + "    https://ko-fi.com/e43bs")
     print()
 
 
@@ -106,6 +156,9 @@ class Progress:
         self.post_total = 0
         self.file_index = 0
         self.file_total = 0
+        self._post_started = None
+        self._durations = []
+        self._buckets = {}
 
     def note(self, kind, **kwargs):
         if kind == "detail":
@@ -123,7 +176,7 @@ class Progress:
                 index=self.file_index,
                 total=self.file_total,
                 name=kwargs.get("name", ""),
-            ))
+            ), "dim")
         elif kind == "trying":
             self.live(tr(
                 self.language,
@@ -134,8 +187,9 @@ class Progress:
                 total=self.file_total,
                 host=kwargs.get("host", ""),
                 name=kwargs.get("name", ""),
-            ))
+            ), "yellow")
         elif kind == "post":
+            self._post_started = time.monotonic()
             self.post_index = kwargs.get("index", 0)
             self.post_total = kwargs.get("total", 0)
             self.commit(tr(
@@ -145,27 +199,37 @@ class Progress:
                 total=self.post_total,
                 post_id=kwargs.get("post_id", ""),
                 title=kwargs.get("title") or kwargs.get("post_id", ""),
-            ))
+            ), "title")
         elif kind == "post-done":
-            self.commit(tr(
+            done = kwargs.get("index", self.post_index)
+            total = kwargs.get("total", self.post_total)
+            line = tr(
                 self.language,
                 "status",
-                done=kwargs.get("index", self.post_index),
-                total=kwargs.get("total", self.post_total),
+                done=done,
+                total=total,
                 saved=self.saved,
                 previews=self.previews,
                 skipped=self.skipped,
                 failed=self.failed,
-            ))
+            )
+            extra = self._time_left(done, total)
+            if extra:
+                line += extra
+            self.commit(line, "accent")
+        elif kind == "folder":
+            self.commit(tr(self.language, "folder", path=kwargs.get("path", "")), "accent")
+        elif kind == "retry":
+            self.commit(tr(self.language, "retry", count=kwargs.get("count", 0)), "yellow")
         elif kind == "download-start":
             self.post_total = kwargs.get("total", 0)
-            self.commit(tr(self.language, "download_start", total=self.post_total))
+            self.commit(tr(self.language, "download_start", total=self.post_total), "title")
         elif kind == "listed":
-            self.commit(tr(self.language, "listed", kept=kwargs.get("kept", 0), empty=kwargs.get("empty", 0)))
+            self.commit(tr(self.language, "listed", kept=kwargs.get("kept", 0), empty=kwargs.get("empty", 0)), "accent")
         elif kind == "dead-host":
-            self.commit(tr(self.language, "dead_host", host=kwargs.get("host", "")))
+            self.commit(tr(self.language, "dead_host", host=kwargs.get("host", "")), "red")
         elif kind == "skip-host":
-            self.commit(tr(self.language, "skip_host", host=kwargs.get("host", "")))
+            self.commit(tr(self.language, "skip_host", host=kwargs.get("host", "")), "yellow")
         elif kind == "creator":
             self.commit(tr(
                 self.language,
@@ -176,40 +240,98 @@ class Progress:
                 count=kwargs.get("count", 0),
             ))
         elif kind == "page":
-            self.commit(tr(self.language, "page", offset=kwargs.get("offset", 0), count=kwargs.get("count", 0)))
+            self.commit(tr(self.language, "page", offset=kwargs.get("offset", 0), count=kwargs.get("count", 0)), "dim")
 
-    def file_done(self, item):
-        if item.status == "failed":
-            self.failed += 1
+    def file_done(self, item, post_id=""):
+        bucket = _count_bucket(item)
+        key = (str(post_id), item.name)
+        previous = self._buckets.get(key)
+        if getattr(item, "retry", False) and previous == bucket:
+            return
+        if previous is not None:
+            setattr(self, previous, max(0, getattr(self, previous) - 1))
+        self._buckets[key] = bucket
+        setattr(self, bucket, getattr(self, bucket) + 1)
+        if bucket == "failed":
             line = tr(self.language, "failed", name=item.name, error=item.error)
-        elif item.kind == "preview":
-            self.previews += 1
+            style = "red"
+        elif bucket == "previews":
             if item.status == "skipped":
                 line = tr(self.language, "skipped", name=item.name)
+                style = "dim"
             else:
                 line = tr(self.language, "saved_preview", name=item.name, nbytes=item.nbytes)
-        elif item.status == "skipped":
-            self.skipped += 1
+                style = "yellow"
+        elif bucket == "skipped":
             line = tr(self.language, "skipped", name=item.name)
+            style = "dim"
         else:
-            self.saved += 1
             line = tr(self.language, "saved", name=item.name, nbytes=item.nbytes)
-        self.commit(line)
+            style = "green"
+        self.commit(line, style)
 
-    def live(self, text):
-        shown = text if len(text) <= self.width else text[:self.width - 3] + "..."
-        print("\r" + shown.ljust(self.width), end="", flush=True)
+    def _remember_post(self):
+        started = self._post_started
+        self._post_started = None
+        if started is None:
+            return
+        elapsed = time.monotonic() - started
+        if elapsed < 0.5:
+            return
+        self._durations.append(elapsed)
+        del self._durations[:-8]
 
-    def commit(self, text):
-        gap = max(0, self.width - len(text))
-        print("\r" + text + (" " * gap), flush=True)
+    def _time_left(self, done, total):
+        self._remember_post()
+        remaining = total - done
+        if remaining <= 0 or not self._durations:
+            return ""
+        average = sum(self._durations) / len(self._durations)
+        if average < 0.5:
+            return ""
+        return tr(self.language, "eta", time=_format_remaining(average * remaining))
+
+    def live(self, text, style="dim"):
+        shown = text if len(text) <= self.width else text[: self.width - 3] + "..."
+        pad = " " * max(0, self.width - len(shown))
+        print("\r" + paint(shown, style) + pad, end="", flush=True)
+
+    def commit(self, text, style=""):
+        pad = " " * max(0, self.width - len(text))
+        print("\r" + paint(text, style) + pad, flush=True)
+
+
+def _count_bucket(item):
+    if item.status == "failed":
+        return "failed"
+    if item.kind == "preview":
+        return "previews"
+    if item.status == "skipped":
+        return "skipped"
+    return "saved"
+
+
+def _format_remaining(seconds):
+    seconds = int(round(seconds))
+    if seconds < 60:
+        return f"{max(0, seconds)}s"
+    if seconds < 90 * 60:
+        return f"{max(1, round(seconds / 60))} min"
+    hours, leftover = divmod(seconds, 3600)
+    minutes = round(leftover / 60)
+    if minutes == 60:
+        hours += 1
+        minutes = 0
+    if minutes:
+        return f"{hours} h {minutes} min"
+    return f"{hours} h"
 
 
 def print_summary(language, result):
     saved = previews = skipped = failed = 0
     for post in result.posts:
         if post.error:
-            print(tr(language, "post_error", post_id=post.post_id, error=post.error))
+            print(paint(tr(language, "post_error", post_id=post.post_id, error=post.error), "red"))
             failed += 1
         for item in post.files:
             if item.status == "failed":
@@ -224,7 +346,7 @@ def print_summary(language, result):
         print(tr(language, "errors_header"))
         for error in result.errors:
             print(f"  {error}")
-    print(tr(
+    print(paint(tr(
         language,
         "summary",
         posts=len(result.posts),
@@ -232,7 +354,7 @@ def print_summary(language, result):
         previews=previews,
         skipped=skipped,
         failed=failed,
-    ))
+    ), "title"))
     if result.empty_skipped:
         print(tr(language, "empty_note", count=result.empty_skipped))
     return 1 if failed or result.errors else 0
@@ -247,7 +369,7 @@ def run_post_command(urls, settings, language):
         urls,
         settings,
         on_note=progress.note,
-        on_file=lambda post_id, item: progress.file_done(item),
+        on_file=lambda post_id, item: progress.file_done(item, post_id),
     )
     return print_summary(language, result)
 
@@ -259,7 +381,7 @@ def run_profile_command(url, mode, settings, language):
         mode,
         settings,
         on_note=progress.note,
-        on_file=lambda post_id, item: progress.file_done(item),
+        on_file=lambda post_id, item: progress.file_done(item, post_id),
     )
     return print_summary(language, result)
 
@@ -268,14 +390,15 @@ def choose(language, title, options):
     while True:
         clear_screen()
         banner(language)
-        print(title)
-        print("-" * 40)
+        print(paint(title, "bold"))
+        print()
         for index, (_key, label) in enumerate(options, start=1):
-            print(f"{index} - {label}")
-        raw = input("\n" + tr(language, "choice")).strip()
+            print(f"  {paint(str(index), 'accent')}  {label}")
+        print()
+        raw = input(paint("  › ", "accent") + tr(language, "choice")).strip()
         if raw.isdigit() and 1 <= int(raw) <= len(options):
             return options[int(raw) - 1][0]
-        print(tr(language, "invalid"))
+        print(paint(tr(language, "invalid"), "red"))
         input(tr(language, "press_enter"))
 
 
