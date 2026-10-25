@@ -43,9 +43,10 @@ py -3 main.py profile "https://kemono.cr/patreon/user/USER_ID" --offset 50
 py -3 main.py profile "https://kemono.cr/patreon/user/USER_ID" --offset 0-750
 py -3 main.py profile "https://kemono.cr/patreon/user/USER_ID" --between 1000 2000
 py -3 main.py --lang pt --dir D:\Archive post "https://coomer.st/onlyfans/user/USER_ID/post/POST_ID"
+py -3 main.py --layout flat profile "https://coomer.st/onlyfans/user/USER_ID"
 ```
 
-`--limit 10` para depois de 10 posts. `--dir` escolhe onde as pastas dos sites são criadas. O padrão é a pasta de onde você iniciou o programa.
+`--limit 10` para depois de 10 posts. `--dir` escolhe onde as pastas dos sites são criadas. O padrão é a pasta de onde você iniciou o programa. `--layout folders` mantém uma pasta por post. `--layout flat` coloca todos os arquivos na pasta do criador. O menu pergunta isso antes de cada download.
 
 ## Configurações
 
@@ -55,7 +56,8 @@ py -3 main.py --lang pt --dir D:\Archive post "https://coomer.st/onlyfans/user/U
 |---|---|---|
 | `get_empty_posts` | `false` | Downloads de perfil ignoram posts sem arquivos |
 | `process_from_oldest` | `false` | Com `true`, baixa o post mais antigo primeiro |
-| `save_info` | `true` | Grava `files.md` ou `files.txt` em cada post |
+| `save_info` | `true` | Grava `files.md` ou `files.txt` em `kcdl-state` para cada post |
+| `separate_folders` | `true` | `true` cria uma pasta por post. `false` coloca todos os arquivos em uma pasta |
 | `post_info` | `md` | `md` ou `txt` |
 | `language` | `en` | `en` ou `pt` |
 | `file_interval` | `1.0` | Segundos entre pedidos de arquivo. O mínimo é 1 |
@@ -72,10 +74,19 @@ kemono/ ou coomer/
 └── Nome-serviço-userId/
     └── posts/
         └── POST_ID/
-            ├── 1-arquivo.ext
-            ├── files.md
-            └── download.json
+            └── 1-arquivo.ext
+
+kcdl-state/
+└── kemono/ ou coomer/
+    ├── profiles.json
+    └── Nome-serviço-userId/
+        └── posts/
+            └── POST_ID/
+                ├── download.json
+                └── files.md
 ```
+
+Com uma pasta só, as imagens ficam direto em `Nome-serviço-userId\`. Se dois posts usariam o mesmo nome de arquivo, o segundo recebe o id do post na frente. O `download.json` e o `files.md` ficam em `kcdl-state`, e não junto das imagens.
 
 `download.json` lembra o que foi salvo. Um arquivo original completo é pulado na próxima execução. Uma prévia é tentada de novo, caso o arquivo completo esteja acessível, e permanece no lugar quando não está.
 

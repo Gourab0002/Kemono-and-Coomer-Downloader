@@ -14,7 +14,7 @@ from kcdl.http import (
     DownloadError,
     hostname,
 )
-from kcdl.media import assign_names, write_json
+from kcdl.media import assign_names, sanitize_filename, write_json
 
 PAWCHIVE_FILES = "https://file.pawchive.pw"
 TEXT_TYPES = {"text/html", "text/plain", "application/json"}
@@ -189,17 +189,62 @@ def _already_complete(dest, record):
     return size > 0 and size == record.get("bytes")
 
 
-def download_post_files(session, site, post, folder, health, pace, timeouts, on_note=None, on_file=None):
+def _flat_name(folder, name, path, manifest, post_id):
+    """Pick a file name that does not replace another post's file."""
+    owners = {}
+    for remote, record in manifest.items():
+        if isinstance(record, dict) and record.get("name"):
+            owners[str(record["name"]).lower()] = remote
+    prefix = sanitize_filename(post_id)[:40] or "post"
+    candidate = name
+    number = 2
+    while number < 100:
+        owner = owners.get(candidate.lower())
+        on_disk = (folder / candidate).exists()
+        if (owner is None or owner == path) and (owner == path or not on_disk):
+            return candidate
+        candidate = f"{prefix}-{name}" if number == 2 else f"{prefix}-{number}-{name}"
+        number += 1
+    return candidate
+
+
+def _take_legacy_manifest(folder, manifest_path):
+    """Move a download.json out of the media folder when a state path is set."""
+    legacy = Path(folder) / "download.json"
+    target = Path(manifest_path) if manifest_path else legacy
+    try:
+        same = target.resolve() == legacy.resolve()
+    except OSError:
+        same = str(target) == str(legacy)
+    if same or not legacy.exists():
+        return target
+    merged = _load_manifest(legacy)
+    merged.update(_load_manifest(target))
+    if merged:
+        write_json(target, {"files": merged})
+    try:
+        legacy.unlink()
+    except OSError:
+        pass
+    return target
+
+
+def download_post_files(
+    session, site, post, folder, health, pace, timeouts,
+    on_note=None, on_file=None, flat=False, manifest_path=None,
+):
     """Download every file for one post. Existing full files are skipped."""
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
-    manifest_path = folder / "download.json"
+    manifest_path = _take_legacy_manifest(folder, manifest_path)
     manifest = _load_manifest(manifest_path)
     referer = post.get("link") or site.root + "/"
     outcomes = []
 
     for item, name in assign_names(post.get("files") or []):
         record = manifest.get(item["path"]) if isinstance(manifest.get(item["path"]), dict) else None
+        if flat and not record:
+            name = _flat_name(folder, name, item["path"], manifest, post.get("id") or "post")
         dest = _existing_file(folder, name, record)
         if _already_complete(dest, record):
             outcome = {

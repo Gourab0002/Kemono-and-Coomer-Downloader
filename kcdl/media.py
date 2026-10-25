@@ -369,15 +369,41 @@ def creator_folder(download_dir, site, profile, service, user_id):
     return folder
 
 
+def manifest_file(download_dir, site_name, creator_name, post_id, flat):
+    """Resume record. Kept outside the folder that holds the downloaded files."""
+    base = Path(download_dir) / "kcdl-state" / site_name / creator_name
+    if flat:
+        return base / "download.json"
+    return base / "posts" / sanitize_filename(post_id)[:80] / "download.json"
+
+
+def info_file(download_dir, site_name, creator_name, post_id, extension):
+    """Post info file. Kept beside the resume record, not with the pictures."""
+    suffix = "txt" if extension == "txt" else "md"
+    post = sanitize_filename(post_id)[:80]
+    return Path(download_dir) / "kcdl-state" / site_name / creator_name / "posts" / post / f"files.{suffix}"
+
+
 def remember_profile(download_dir, site, profile):
-    path = Path(download_dir) / site.name / "profiles.json"
-    data = {}
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            data = {}
-    if not isinstance(data, dict):
-        data = {}
+    path = Path(download_dir) / "kcdl-state" / site.name / "profiles.json"
+    legacy = Path(download_dir) / site.name / "profiles.json"
+    data = _read_profile_index(path)
+    if legacy.exists() and legacy.resolve() != path.resolve():
+        data.update(_read_profile_index(legacy))
     data[str(profile.get("id") or "")] = profile
     write_json(path, data)
+    if legacy.exists() and legacy.resolve() != path.resolve():
+        try:
+            legacy.unlink()
+        except OSError:
+            pass
+
+
+def _read_profile_index(path):
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}

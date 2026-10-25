@@ -7,8 +7,9 @@ from pathlib import Path
 import requests
 
 from kcdl.config import normalize
-from kcdl.download import build_candidates, download_candidates, download_post_files
-from kcdl.engine import _walk_offsets
+from kcdl.download import _flat_name, _take_legacy_manifest, build_candidates, download_candidates, download_post_files
+from kcdl.engine import _remove_legacy_info, _walk_offsets
+from kcdl.media import info_file
 from kcdl.http import HostHealth, Pace
 from kcdl.media import (
     FetchMode,
@@ -284,6 +285,49 @@ class FileTests(unittest.TestCase):
             self.assertEqual(outcomes[0]["kind"], "preview")
             self.assertEqual(preview.read_bytes(), b"thumb")
 
+    def test_flat_folder_does_not_overwrite_another_posts_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "1-pic.png").write_bytes(b"first")
+            manifest = {PATH: {"name": "1-pic.png", "bytes": 5, "kind": "preview", "source": "x"}}
+            other = "/6b/fb/" + ("b" * 64) + ".png"
+            renamed = _flat_name(folder, "1-pic.png", other, manifest, "99")
+            same = _flat_name(folder, "1-pic.png", PATH, manifest, "1")
+        self.assertEqual(renamed, "99-1-pic.png")
+        self.assertEqual(same, "1-pic.png")
+
+    def test_resume_record_is_moved_out_of_the_download_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "post"
+            folder.mkdir()
+            legacy = folder / "download.json"
+            legacy.write_text(
+                __import__("json").dumps({"files": {PATH: {"name": "1-pic.png", "bytes": 4, "kind": "original", "source": "x"}}}),
+                encoding="utf-8",
+            )
+            state = Path(tmp) / "kcdl-state" / "download.json"
+            target = _take_legacy_manifest(folder, state)
+            saved = __import__("json").loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(target, state)
+        self.assertFalse(legacy.exists())
+        self.assertEqual(saved["files"][PATH]["name"], "1-pic.png")
+
+    def test_info_file_is_outside_the_download_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pictures = root / "coomer" / "name" / "posts" / "12"
+            pictures.mkdir(parents=True)
+            (pictures / "files.md").write_text("old", encoding="utf-8")
+            (pictures / "1-pic.jpg").write_bytes(b"img")
+            path = info_file(root, "coomer", "name", "12", "md")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("new", encoding="utf-8")
+            _remove_legacy_info(pictures, path, "12")
+            self.assertEqual(path.read_text(encoding="utf-8"), "new")
+            self.assertFalse((pictures / "files.md").exists())
+            self.assertTrue((pictures / "1-pic.jpg").exists())
+            self.assertIn("kcdl-state", path.parts)
+
 
 class ConfigTests(unittest.TestCase):
     def test_file_interval_cannot_drop_below_one_second(self):
@@ -292,6 +336,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(data["post_info"], "md")
         self.assertEqual(data["language"], "en")
         self.assertTrue(data["save_info"])
+        self.assertTrue(data["separate_folders"])
+        self.assertFalse(normalize({"separate_folders": False})["separate_folders"])
 
 
 if __name__ == "__main__":

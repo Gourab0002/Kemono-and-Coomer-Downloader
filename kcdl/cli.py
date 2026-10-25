@@ -57,6 +57,11 @@ def build_parser():
     )
     parser.add_argument("--lang", choices=("en", "pt"), help="Menu language for this run")
     parser.add_argument("--dir", type=Path, help="Folder where kemono/ and coomer/ are created")
+    parser.add_argument(
+        "--layout",
+        choices=("folders", "flat"),
+        help="folders: one folder per post. flat: all files in one folder",
+    )
     sub = parser.add_subparsers(dest="command")
 
     post = sub.add_parser("post", help="Download one or more post links")
@@ -274,6 +279,23 @@ def ask_profile_mode(language):
     )
 
 
+def ask_layout(config, language, layout):
+    """Choose per-post folders or one shared folder. Return False to go back."""
+    if layout in ("folders", "flat"):
+        config["separate_folders"] = layout == "folders"
+        return True
+    action = choose(language, tr(language, "layout_title"), [
+        ("folders", tr(language, "layout_folders")),
+        ("flat", tr(language, "layout_flat")),
+        ("back", tr(language, "back")),
+    ])
+    if action == "back":
+        return False
+    config["separate_folders"] = action == "folders"
+    save(config)
+    return True
+
+
 def settings_menu(config, language):
     while True:
         lang_label = tr(language, "lang_en" if config["language"] == "en" else "lang_pt")
@@ -281,6 +303,7 @@ def settings_menu(config, language):
             ("empty", tr(language, "set_empty", value=config["get_empty_posts"])),
             ("oldest", tr(language, "set_oldest", value=config["process_from_oldest"])),
             ("info", tr(language, "set_info", value=config["save_info"])),
+            ("layout", tr(language, "set_layout", value=config["separate_folders"])),
             ("format", tr(language, "set_format", value=config["post_info"])),
             ("lang", tr(language, "set_lang", value=lang_label)),
             ("back", tr(language, "back")),
@@ -293,6 +316,8 @@ def settings_menu(config, language):
             config["process_from_oldest"] = not config["process_from_oldest"]
         elif action == "info":
             config["save_info"] = not config["save_info"]
+        elif action == "layout":
+            config["separate_folders"] = not config["separate_folders"]
         elif action == "format":
             config["post_info"] = "txt" if config["post_info"] == "md" else "md"
         elif action == "lang":
@@ -301,7 +326,7 @@ def settings_menu(config, language):
         save(config)
 
 
-def interactive(config, download_dir, forced_language):
+def interactive(config, download_dir, forced_language, layout=None):
     language = forced_language or config["language"]
     while True:
         action = choose(language, tr(language, "menu_title"), [
@@ -320,6 +345,8 @@ def interactive(config, download_dir, forced_language):
                 language = forced_language
             continue
         if action == "post":
+            if not ask_layout(config, language, layout):
+                continue
             urls = ask_links(language)
             if not urls:
                 continue
@@ -329,6 +356,8 @@ def interactive(config, download_dir, forced_language):
             continue
         picked = ask_profile_mode(language)
         if not picked:
+            continue
+        if not ask_layout(config, language, layout):
             continue
         url, mode = picked
         settings = make_settings(config, download_dir, language, None)
@@ -343,6 +372,9 @@ def run(argv=None):
     config = load()
     language = args.lang or config["language"]
     download_dir = args.dir
+
+    if args.layout in ("folders", "flat"):
+        config["separate_folders"] = args.layout == "folders"
 
     if args.command == "post":
         try:
@@ -375,7 +407,7 @@ def run(argv=None):
         settings = make_settings(config, download_dir, language, args.limit)
         return run_profile_command(args.url, mode, settings, language)
 
-    return interactive(config, download_dir, args.lang)
+    return interactive(config, download_dir, args.lang, args.layout)
 
 
 def main(argv=None):

@@ -43,9 +43,10 @@ py -3 main.py profile "https://kemono.cr/patreon/user/USER_ID" --offset 50
 py -3 main.py profile "https://kemono.cr/patreon/user/USER_ID" --offset 0-750
 py -3 main.py profile "https://kemono.cr/patreon/user/USER_ID" --between 1000 2000
 py -3 main.py --lang pt --dir D:\Archive post "https://coomer.st/onlyfans/user/USER_ID/post/POST_ID"
+py -3 main.py --layout flat profile "https://coomer.st/onlyfans/user/USER_ID"
 ```
 
-`--limit 10` stops after 10 posts. `--dir` chooses where the site folders are created. The default is the folder you started the program from.
+`--limit 10` stops after 10 posts. `--dir` chooses where the site folders are created. The default is the folder you started the program from. `--layout folders` keeps one folder per post. `--layout flat` puts every file in the creator folder. The menu asks this before each download.
 
 ## Settings
 
@@ -55,7 +56,8 @@ py -3 main.py --lang pt --dir D:\Archive post "https://coomer.st/onlyfans/user/U
 |---|---|---|
 | `get_empty_posts` | `false` | Profile downloads skip posts that have no files |
 | `process_from_oldest` | `false` | Oldest post first when this is `true` |
-| `save_info` | `true` | Write `files.md` or `files.txt` for each post |
+| `save_info` | `true` | Write `files.md` or `files.txt` under `kcdl-state` for each post |
+| `separate_folders` | `true` | `true` puts each post in its own folder. `false` puts every file in one folder |
 | `post_info` | `md` | `md` or `txt` |
 | `language` | `en` | `en` or `pt` |
 | `file_interval` | `1.0` | Seconds between file requests. The minimum is 1 |
@@ -72,10 +74,19 @@ kemono/ or coomer/
 └── Name-service-userId/
     └── posts/
         └── POST_ID/
-            ├── 1-filename.ext
-            ├── files.md
-            └── download.json
+            └── 1-filename.ext
+
+kcdl-state/
+└── kemono/ or coomer/
+    ├── profiles.json
+    └── Name-service-userId/
+        └── posts/
+            └── POST_ID/
+                ├── download.json
+                └── files.md
 ```
+
+With one shared folder, the pictures sit directly inside `Name-service-userId\`. If two posts would use the same file name, the later one is prefixed with its post id. `download.json` and `files.md` stay in `kcdl-state`, not next to the pictures.
 
 `download.json` remembers what was saved. A finished original file is skipped on the next run. A preview is tried again in case the full file is reachable, and the preview stays in place when it is not.
 

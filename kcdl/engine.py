@@ -9,6 +9,8 @@ from kcdl.media import (
     PAGE_SIZE,
     creator_folder,
     in_id_range,
+    info_file,
+    manifest_file,
     normalize_detail,
     normalize_list_post,
     page_offsets,
@@ -141,7 +143,9 @@ def _download_ready(session, site, profile, posts, settings, on_note, on_post, o
     )
     outcomes = []
     for post in posts:
-        post_folder = folder / "posts" / sanitize_id(post["id"])
+        post_id = sanitize_id(post["id"])
+        flat = not settings.separate_folders
+        post_folder = folder if flat else folder / "posts" / post_id
         if on_post:
             on_post(post)
         try:
@@ -170,6 +174,14 @@ def _download_ready(session, site, profile, posts, settings, on_note, on_post, o
                 timeouts=settings.timeouts,
                 on_note=on_note,
                 on_file=emit,
+                flat=flat,
+                manifest_path=manifest_file(
+                    settings.download_dir,
+                    site.name,
+                    folder.name,
+                    post_id,
+                    flat,
+                ),
             )
         except Exception as exc:
             outcomes.append(PostOutcome(
@@ -180,10 +192,12 @@ def _download_ready(session, site, profile, posts, settings, on_note, on_post, o
             ))
             continue
         if settings.save_info:
-            info_name = "files.md" if settings.post_info == "md" else "files.txt"
+            extension = "md" if settings.post_info == "md" else "txt"
             text = render_info(post, files, settings.post_info)
-            post_folder.mkdir(parents=True, exist_ok=True)
-            (post_folder / info_name).write_text(text, encoding="utf-8")
+            info_path = info_file(settings.download_dir, site.name, folder.name, post_id, extension)
+            info_path.parent.mkdir(parents=True, exist_ok=True)
+            info_path.write_text(text, encoding="utf-8")
+            _remove_legacy_info(post_folder, info_path, post_id)
         outcomes.append(PostOutcome(
             post_id=post["id"],
             title=post.get("title") or "",
@@ -191,6 +205,18 @@ def _download_ready(session, site, profile, posts, settings, on_note, on_post, o
             files=files,
         ))
     return outcomes
+
+
+def _remove_legacy_info(post_folder, info_path, post_id):
+    """Delete info files left in the picture folder by older versions."""
+    names = ("files.md", "files.txt", f"{post_id}.md", f"{post_id}.txt")
+    for name in names:
+        legacy = post_folder / name
+        try:
+            if legacy.exists() and legacy.resolve() != info_path.resolve():
+                legacy.unlink()
+        except OSError:
+            pass
 
 
 def sanitize_id(post_id):

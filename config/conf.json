@@ -3,6 +3,7 @@
     "process_from_oldest": false,
     "post_info": "md",
     "save_info": true,
+    "separate_folders": true,
     "language": "en",
     "file_interval": 1.0,
     "api_interval": 0.4,
