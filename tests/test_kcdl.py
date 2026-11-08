@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import requests
 
 from kcdl.cli import Progress, _format_remaining, _input_mode
-from kcdl.config import normalize
+from kcdl.config import accepted_download_dir, normalize, resolve_download_dir
 from kcdl.download import _flat_name, _take_legacy_manifest, build_candidates, download_candidates, download_post_files
 from kcdl.engine import _download_with_retry, _remove_legacy_info, _walk_offsets
 from kcdl.media import info_file
@@ -545,6 +545,21 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(data["save_info"])
         self.assertTrue(data["separate_folders"])
         self.assertFalse(normalize({"separate_folders": False})["separate_folders"])
+        self.assertEqual(data["download_dir"], "")
+
+    def test_download_folder_is_saved_and_a_file_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "pics"
+            folder.mkdir()
+            notes = Path(tmp) / "notes.txt"
+            notes.write_text("x", encoding="utf-8")
+            self.assertIsNone(accepted_download_dir(str(notes)))
+            self.assertEqual(normalize({"download_dir": str(notes)})["download_dir"], "")
+            saved = normalize({"download_dir": f' "{folder}" '})["download_dir"]
+            self.assertEqual(Path(saved), folder.resolve())
+            self.assertEqual(resolve_download_dir({"download_dir": saved}, None), folder.resolve())
+            self.assertEqual(resolve_download_dir({"download_dir": saved}, Path(tmp)), Path(tmp))
+        self.assertEqual(resolve_download_dir({"download_dir": ""}, None), Path.cwd())
 
 
 if __name__ == "__main__":

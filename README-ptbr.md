@@ -46,7 +46,7 @@ py -3 main.py --lang pt --dir D:\Archive post "https://coomer.st/onlyfans/user/U
 py -3 main.py --layout flat profile "https://coomer.st/onlyfans/user/USER_ID"
 ```
 
-`--limit 10` para depois de 10 posts. `--dir` escolhe onde as pastas dos sites são criadas. O padrão é a pasta de onde você iniciou o programa. `--layout folders` mantém uma pasta por post. `--layout flat` coloca todos os arquivos na pasta do criador. O menu pergunta isso antes de cada download.
+`--limit 10` para depois de 10 posts. `--dir` escolhe onde as pastas dos sites são criadas nessa execução. As configurações podem guardar uma pasta de download, e uma pasta vazia significa a pasta de onde você iniciou o programa. `--layout folders` mantém uma pasta por post. `--layout flat` coloca todos os arquivos na pasta do criador. O menu pergunta o layout antes de cada download.
 
 Enquanto um download está em andamento, a janela mostra a pasta de destino, o arquivo atual e uma estimativa de tempo. Clicar no texto não pausa o programa.
 
@@ -60,6 +60,7 @@ Enquanto um download está em andamento, a janela mostra a pasta de destino, o a
 | `process_from_oldest` | `false` | Com `true`, baixa o post mais antigo primeiro |
 | `save_info` | `true` | Grava `files.md` ou `files.txt` em `kcdl-state` para cada post |
 | `separate_folders` | `true` | `true` cria uma pasta por post. `false` coloca todos os arquivos em uma pasta |
+| `download_dir` | vazio | Pasta onde `kemono/` e `coomer/` são criadas. Vazio usa a pasta de onde você iniciou o programa. As configurações podem procurar uma pasta ou receber um caminho digitado. `--dir` substitui isso em uma execução |
 | `post_info` | `md` | `md` ou `txt` |
 | `language` | `en` | `en` ou `pt` |
 | `file_interval` | `1.0` | Segundos entre pedidos de arquivo. O mínimo é 1 |

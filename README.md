@@ -46,7 +46,7 @@ py -3 main.py --lang pt --dir D:\Archive post "https://coomer.st/onlyfans/user/U
 py -3 main.py --layout flat profile "https://coomer.st/onlyfans/user/USER_ID"
 ```
 
-`--limit 10` stops after 10 posts. `--dir` chooses where the site folders are created. The default is the folder you started the program from. `--layout folders` keeps one folder per post. `--layout flat` puts every file in the creator folder. The menu asks this before each download.
+`--limit 10` stops after 10 posts. `--dir` chooses where the site folders are created for that run. Settings can save a download folder, and an empty folder means the folder you started the program from. `--layout folders` keeps one folder per post. `--layout flat` puts every file in the creator folder. The menu asks about the layout before each download.
 
 While a download is running, the window shows the save folder, the current file, and a rough time left. Clicking the text does not pause the program.
 
@@ -60,6 +60,7 @@ While a download is running, the window shows the save folder, the current file,
 | `process_from_oldest` | `false` | Oldest post first when this is `true` |
 | `save_info` | `true` | Write `files.md` or `files.txt` under `kcdl-state` for each post |
 | `separate_folders` | `true` | `true` puts each post in its own folder. `false` puts every file in one folder |
+| `download_dir` | empty | Folder where `kemono/` and `coomer/` are created. Empty uses the folder you started from. Settings can browse for a folder or take a typed path. `--dir` overrides this for one run |
 | `post_info` | `md` | `md` or `txt` |
 | `language` | `en` | `en` or `pt` |
 | `file_interval` | `1.0` | Seconds between file requests. The minimum is 1 |

@@ -4,6 +4,7 @@
     "post_info": "md",
     "save_info": true,
     "separate_folders": true,
+    "download_dir": "",
     "language": "en",
     "file_interval": 1.0,
     "api_interval": 0.4,

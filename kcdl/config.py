@@ -13,6 +13,7 @@ DEFAULTS = {
     "post_info": "md",
     "save_info": True,
     "separate_folders": True,
+    "download_dir": "",
     "language": "en",
     "file_interval": 1.0,
     "api_interval": 0.4,
@@ -31,6 +32,8 @@ def normalize(data):
     merged["process_from_oldest"] = bool(merged["process_from_oldest"])
     merged["save_info"] = bool(merged["save_info"])
     merged["separate_folders"] = _bool(merged["separate_folders"], True)
+    picked = accepted_download_dir(merged.get("download_dir"))
+    merged["download_dir"] = "" if picked is None else picked
     if str(merged["post_info"]).lower() not in ("md", "txt"):
         merged["post_info"] = "md"
     else:
@@ -43,6 +46,30 @@ def normalize(data):
     merged["connect_timeout"] = min(30.0, max(2.0, _float(merged["connect_timeout"], 5.0)))
     merged["read_timeout"] = min(600.0, max(10.0, _float(merged["read_timeout"], 120.0)))
     return merged
+
+
+def accepted_download_dir(value):
+    """Return a folder path, '' when unset, or None when the path is a file."""
+    text = str(value or "").strip().strip('"')
+    if not text:
+        return ""
+    path = Path(text).expanduser()
+    try:
+        if path.exists() and not path.is_dir():
+            return None
+        return str(path.resolve())
+    except OSError:
+        return str(path)
+
+
+def resolve_download_dir(config, override=None):
+    """Use the command folder when one was given, otherwise the saved folder."""
+    if override:
+        return Path(override).expanduser()
+    saved = accepted_download_dir((config or {}).get("download_dir"))
+    if saved:
+        return Path(saved)
+    return Path.cwd()
 
 
 def _bool(value, fallback):

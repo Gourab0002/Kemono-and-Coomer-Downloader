@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from kcdl import __version__
-from kcdl.config import load, save, settings_from
+from kcdl.config import accepted_download_dir, load, resolve_download_dir, save, settings_from
 from kcdl.engine import run_links, run_profile
 from kcdl.i18n import tr
 from kcdl.media import FetchMode, mode_from_offset_text, numeric_id
@@ -106,7 +106,11 @@ def build_parser():
         description="Download posts from Kemono and Coomer.",
     )
     parser.add_argument("--lang", choices=("en", "pt"), help="Menu language for this run")
-    parser.add_argument("--dir", type=Path, help="Folder where kemono/ and coomer/ are created")
+    parser.add_argument(
+        "--dir",
+        type=Path,
+        help="Folder where kemono/ and coomer/ are created. Overrides the saved folder for this run",
+    )
     parser.add_argument(
         "--layout",
         choices=("folders", "flat"),
@@ -138,7 +142,7 @@ def gather_links(urls, file_path):
 
 
 def make_settings(config, download_dir, language, limit):
-    return settings_from(config, download_dir or Path.cwd(), language=language, limit=limit)
+    return settings_from(config, resolve_download_dir(config, download_dir), language=language, limit=limit)
 
 
 class Progress:
@@ -501,10 +505,79 @@ def ask_layout(config, language, layout):
     return True
 
 
+def browse_folder(initial, title):
+    """Open a folder window. Return the path, '' if cancelled, or None if it cannot open."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+    except Exception:
+        return None
+    try:
+        root.withdraw()
+        try:
+            root.wm_attributes("-topmost", True)
+        except Exception:
+            pass
+        start = initial if initial and Path(initial).is_dir() else str(Path.cwd())
+        try:
+            chosen = filedialog.askdirectory(parent=root, initialdir=start, title=title, mustexist=False)
+        except TypeError:
+            chosen = filedialog.askdirectory(parent=root, initialdir=start, title=title)
+    except Exception:
+        return None
+    finally:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+    return chosen or ""
+
+
+def ask_download_folder(config, language):
+    """Let the user pick a folder. The choice is saved for the next run."""
+    while True:
+        action = choose(language, tr(language, "folder_title"), [
+            ("browse", tr(language, "folder_browse")),
+            ("type", tr(language, "folder_type")),
+            ("reset", tr(language, "folder_reset")),
+            ("back", tr(language, "back")),
+        ])
+        if action == "back":
+            return
+        if action == "reset":
+            config["download_dir"] = ""
+            save(config)
+            return
+        if action == "browse":
+            chosen = browse_folder(config.get("download_dir") or "", tr(language, "folder_title"))
+            if chosen is None:
+                print(tr(language, "folder_picker_unavailable"))
+                pause(language)
+                continue
+            if not chosen:
+                continue
+            raw = chosen
+        else:
+            raw = input(tr(language, "folder_prompt")).strip()
+            if not raw:
+                continue
+        picked = accepted_download_dir(raw)
+        if not picked:
+            print(tr(language, "folder_invalid", path=raw))
+            pause(language)
+            continue
+        config["download_dir"] = picked
+        save(config)
+        return
+
+
 def settings_menu(config, language):
     while True:
         lang_label = tr(language, "lang_en" if config["language"] == "en" else "lang_pt")
+        folder_label = config.get("download_dir") or tr(language, "folder_here")
         action = choose(language, tr(language, "settings_title"), [
+            ("folder", tr(language, "set_folder", value=folder_label)),
             ("empty", tr(language, "set_empty", value=config["get_empty_posts"])),
             ("oldest", tr(language, "set_oldest", value=config["process_from_oldest"])),
             ("info", tr(language, "set_info", value=config["save_info"])),
@@ -515,7 +588,9 @@ def settings_menu(config, language):
         ])
         if action == "back":
             return save(config), language
-        if action == "empty":
+        if action == "folder":
+            ask_download_folder(config, language)
+        elif action == "empty":
             config["get_empty_posts"] = not config["get_empty_posts"]
         elif action == "oldest":
             config["process_from_oldest"] = not config["process_from_oldest"]
